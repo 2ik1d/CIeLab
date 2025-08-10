@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>CIELab Color Tool</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#ffffff">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+<style>
+  body { font-family: sans-serif; max-width: 1100px; margin: auto; padding: 10px; }
+  input { width: 60px; margin: 2px; }
+  .row { margin: 5px 0; }
+</style>
+</head>
+<body>
+
+<h2>CIELab Color Visualization Tool</h2>
+
+<div class="row">
+  <strong>Эталон (Reference):</strong><br>
+  L*: <input id="L1" value="55"> 
+  a*: <input id="a1" value="20"> 
+  b*: <input id="b1" value="30">
+</div>
+
+<div class="row">
+  <strong>Образец (Sample):</strong><br>
+  L*: <input id="L2" value="53.5"> 
+  a*: <input id="a2" value="18"> 
+  b*: <input id="b2" value="25">
+</div>
+
+<button onclick="updatePlot()">Построить</button>
+
+<div id="metrics" style="margin-top:10px; font-size:14px;"></div>
+<div id="plotAB" style="width:100%; height:500px;"></div>
+<div id="plotCL" style="width:100%; height:400px;"></div>
+
+<script>
+// Регистрация service worker
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('service-worker.js')
+      .then(() => console.log('Service Worker зарегистрирован'));
+}
+
+// ==== Функции для CIELab ====
+function deltaE76(lab1, lab2) {
+  return Math.sqrt(
+    Math.pow(lab1[0]-lab2[0],2) +
+    Math.pow(lab1[1]-lab2[1],2) +
+    Math.pow(lab1[2]-lab2[2],2)
+  );
+}
+
+function labToChroma(lab) {
+  return Math.sqrt(lab[1]**2 + lab[2]**2);
+}
+
+function labToHue(lab) {
+  let hue = Math.atan2(lab[2], lab[1]) * 180 / Math.PI;
+  return hue >= 0 ? hue : hue + 360;
+}
+
+// ==== Построение графиков ====
+function updatePlot() {
+  const lab1 = [
+    parseFloat(document.getElementById('L1').value),
+    parseFloat(document.getElementById('a1').value),
+    parseFloat(document.getElementById('b1').value)
+  ];
+  const lab2 = [
+    parseFloat(document.getElementById('L2').value),
+    parseFloat(document.getElementById('a2').value),
+    parseFloat(document.getElementById('b2').value)
+  ];
+
+  const dE76 = deltaE76(lab1, lab2).toFixed(3);
+  const c1 = labToChroma(lab1).toFixed(2);
+  const c2 = labToChroma(lab2).toFixed(2);
+  const h1 = labToHue(lab1).toFixed(1);
+  const h2 = labToHue(lab2).toFixed(1);
+
+  document.getElementById('metrics').innerHTML = `
+    ΔE76: <b>${dE76}</b><br>
+    Chroma: Ref=${c1}, Sample=${c2}<br>
+    Hue: Ref=${h1}°, Sample=${h2}°
+  `;
+
+  // --- График AB ---
+  const refPoint = {
+    x: [lab1[1]], y: [lab1[2]],
+    mode: 'markers', type: 'scatter',
+    name: 'Reference',
+    marker: { size: 12, color: 'red' }
+  };
+  const samplePoint = {
+    x: [lab2[1]], y: [lab2[2]],
+    mode: 'markers', type: 'scatter',
+    name: 'Sample',
+    marker: { size: 12, color: 'blue' }
+  };
+  const vector = {
+    x: [lab1[1], lab2[1]], y: [lab1[2], lab2[2]],
+    mode: 'lines+markers', type: 'scatter',
+    name: 'Δ Vector',
+    line: { dash: 'dot', width: 2, color: 'black' }
+  };
+  Plotly.newPlot('plotAB', [refPoint, samplePoint, vector], {
+    xaxis: { title: 'a*' },
+    yaxis: { title: 'b*' },
+    title: 'CIELab a* vs b*',
+    width: 1000, height: 500
+  });
+
+  // --- График Chroma vs Lightness ---
+  const clPoints = {
+    x: [c1, c2],
+    y: [lab1[0], lab2[0]],
+    mode: 'markers+text', type: 'scatter',
+    text: ['Ref', 'Sample'],
+    textposition: 'right',
+    marker: { size: 12, color: ['red', 'blue'] },
+    name: 'Chroma-L'
+  };
+  Plotly.newPlot('plotCL', [clPoints], {
+    xaxis: { title: 'Chroma' },
+    yaxis: { title: 'Lightness L*' },
+    title: 'Chroma vs Lightness',
+    width: 1000, height: 400
+  });
+}
+
+updatePlot();
+</script>
+</body>
+</html>
