@@ -1,155 +1,214 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-<meta charset="UTF-8">
-<title>CIELab Mobile Tool</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1"> 
+<title>CIELab Mobile — pinch zoom ready</title>
+
+<!-- PWA -->
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#ffffff">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
+
+<!-- Plotly -->
 <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+
 <style>
-  body { font-family: sans-serif; margin: 0; padding: 10px; background: #f9f9f9; }
-  h2 { text-align: center; }
-  .input-group { display: flex; justify-content: space-between; margin: 5px 0; }
-  .input-group label { flex: 1; font-size: 14px; }
-  .input-group input { flex: 1; font-size: 18px; padding: 5px; margin-left: 5px; }
-  button { width: 100%; padding: 12px; font-size: 18px; margin-top: 8px; }
-  #metrics { background: #fff; padding: 8px; border-radius: 6px; margin-top: 10px; font-size: 15px; }
+  :root{ --pad:12px; --bg:#f6f7f9; --card:#fff; }
+  html,body{ height:100%; margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial; background:var(--bg); -webkit-font-smoothing:antialiased; }
+  .app { max-width:820px; margin:0 auto; padding:16px; box-sizing:border-box; }
+  h1 { font-size:20px; margin:6px 0 12px; text-align:center; }
+  .card { background:var(--card); padding:12px; border-radius:10px; box-shadow:0 1px 4px rgba(0,0,0,0.06); }
+  .row { display:flex; gap:8px; margin:8px 0; align-items:center; }
+  label { font-size:13px; min-width:34px; }
+  input[type=number] { flex:1; padding:8px; font-size:16px; border:1px solid #e3e6ea; border-radius:6px; }
+  button { width:100%; padding:12px; margin-top:10px; font-size:17px; border-radius:8px; border:0; background:#0a84ff; color:white; }
+  #metrics { margin-top:10px; font-size:14px; background:linear-gradient(180deg,#fff,#fbfdff); padding:10px; border-radius:8px; }
+  /* важное: чтобы браузер не перехватывал pinch/drag внутри графиков */
+  #plotAB, #plotCL { touch-action: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  /* адаптив */
+  @media (max-width:420px){
+    .app { padding:8px; }
+    h1 { font-size:18px; }
+    input[type=number] { font-size:18px; padding:10px; }
+    button { font-size:18px; padding:14px; }
+  }
 </style>
 </head>
 <body>
+<div class="app">
+  <h1>CIELab Mobile — pinch & pan</h1>
 
-<h2>CIELab Mobile Tool</h2>
+  <div class="card" aria-label="inputs">
+    <div style="font-weight:600">Эталон Reference2</div>
+    <div class="row"><label>L*</label><input id="L1" type="number" value="55" step="0.1"></div>
+    <div class="row"><label>a*</label><input id="a1" type="number" value="20" step="0.1"></div>
+    <div class="row"><label>b*</label><input id="b1" type="number" value="30" step="0.1"></div>
 
-<div style="background:#fff; padding:10px; border-radius:8px;">
-  <h3>Эталон Reference1</h3>
-  <div class="input-group"><label>L*:</label><input id="L1" type="number" value="55"></div>
-  <div class="input-group"><label>a*:</label><input id="a1" type="number" value="20"></div>
-  <div class="input-group"><label>b*:</label><input id="b1" type="number" value="30"></div>
+    <div style="height:8px"></div>
 
-  <h3>Образец Sample</h3>
-  <div class="input-group"><label>L*:</label><input id="L2" type="number" value="53.5"></div>
-  <div class="input-group"><label>a*:</label><input id="a2" type="number" value="18"></div>
-  <div class="input-group"><label>b*:</label><input id="b2" type="number" value="25"></div>
+    <div style="font-weight:600">Образец Sample</div>
+    <div class="row"><label>L*</label><input id="L2" type="number" value="53.5" step="0.1"></div>
+    <div class="row"><label>a*</label><input id="a2" type="number" value="18" step="0.1"></div>
+    <div class="row"><label>b*</label><input id="b2" type="number" value="25" step="0.1"></div>
 
-  <button onclick="updatePlot()">Построить</button>
+    <button id="buildBtn">Построить</button>
+  </div>
+
+  <div id="metrics" class="card" style="margin-top:12px;"></div>
+
+  <!-- графики -->
+  <div id="plotAB" class="card" style="margin-top:12px; height:420px;"></div>
+  <div id="plotCL" class="card" style="margin-top:12px; height:300px;"></div>
 </div>
 
-<div id="metrics"></div>
-<div id="plotAB" style="width:100%; height:400px;"></div>
-<div id="plotCL" style="width:100%; height:300px;"></div>
-
 <script>
-if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('service-worker.js')
-      .then(() => console.log('Service Worker зарегистрирован'));
+/* =========================
+   Utilities: Lab <-> RGB
+   ========================= */
+function labToXYZ(L,a,b){
+  const fy = (L + 16)/116;
+  const fx = fy + a/500;
+  const fz = fy - b/200;
+  function fInv(t){ const delta = 6/29; return t>delta ? t*t*t : 3*delta*delta*(t - 4/29); }
+  const xr = fInv(fx), yr = fInv(fy), zr = fInv(fz);
+  return [xr*95.047, yr*100.0, zr*108.883];
 }
+function xyzToSRGB(X,Y,Z){
+  let x = X/100, y = Y/100, z = Z/100;
+  let r =  x*3.2406 + y*(-1.5372) + z*(-0.4986);
+  let g =  x*(-0.9689) + y*1.8758 + z*0.0415;
+  let b =  x*0.0557 + y*(-0.2040) + z*1.0570;
+  function comp(c){ return c<=0.0031308 ? 12.92*c : 1.055*Math.pow(c,1/2.4)-0.055; }
+  r = comp(r); g = comp(g); b = comp(b);
+  return [Math.min(Math.max(0,r),1), Math.min(Math.max(0,g),1), Math.min(Math.max(0,b),1)];
+}
+function labToSRGB(lab){ return xyzToSRGB(...labToXYZ(lab)); }
 
-function deltaE76(lab1, lab2) {
-  return Math.sqrt(
-    Math.pow(lab1[0]-lab2[0],2) +
-    Math.pow(lab1[1]-lab2[1],2) +
-    Math.pow(lab1[2]-lab2[2],2)
-  );
-}
-function labToChroma(lab) { return Math.sqrt(lab[1]**2 + lab[2]**2); }
-function labToHue(lab) {
-  let hue = Math.atan2(lab[2], lab[1]) * 180 / Math.PI;
-  return hue >= 0 ? hue : hue + 360;
-}
+/* =========================
+   DeltaE76 & helpers
+   ========================= */
+function deltaE76(l1,l2){ return Math.hypot(l1[0]-l2[0], l1[1]-l2[1], l1[2]-l2[2]); }
+function chroma(lab){ return Math.hypot(lab[1], lab[2]); }
+function hueDeg(lab){ let ang = Math.atan2(lab[2], lab[1]) * 180/Math.PI; return ang<0?ang+360:ang; }
 
-// LAB -> XYZ -> RGB
-function labToXYZ(lab) {
-  let [L,a,b] = lab;
-  let y = (L + 16) / 116;
-  let x = a / 500 + y;
-  let z = y - b / 200;
-  const xyz = [x, y, z].map(v => {
-    let v3 = v**3;
-    return (v3 > 0.008856) ? v3 : (v - 16/116) / 7.787;
-  });
-  return [
-    xyz[0] * 95.047,
-    xyz[1] * 100.0,
-    xyz[2] * 108.883
-  ];
-}
-function xyzToRGB(xyz) {
-  let [x,y,z] = xyz.map(v => v / 100);
-  let r = x*3.2406 + y*(-1.5372) + z*(-0.4986);
-  let g = x*(-0.9689) + y*1.8758 + z*0.0415;
-  let b = x*0.0557 + y*(-0.2040) + z*1.0570;
-  const rgb = [r,g,b].map(v => {
-    v = v > 0.0031308 ? 1.055*(v**(1/2.4)) - 0.055 : 12.92*v;
-    return Math.min(Math.max(0, v), 1);
-  });
-  return rgb;
-}
-function labToRGB(lab) {
-  return xyzToRGB(labToXYZ(lab));
-}
-
-function generateABBackground(size=256) {
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  const L = 50; // фиксируем L для фона
-  const imgData = ctx.createImageData(size, size);
-  for (let y=0; y<size; y++) {
-    for (let x=0; x<size; x++) {
-      let a = (x / size) * 200 - 100;
-      let b = ((size-y) / size) * 200 - 100;
-      const rgb = labToRGB([L, a, b]).map(v => Math.round(v*255));
-      const idx = (y*size + x)*4;
-      imgData.data[idx] = rgb[0];
-      imgData.data[idx+1] = rgb[1];
-      imgData.data[idx+2] = rgb[2];
-      imgData.data[idx+3] = 255;
+/* =========================
+   Smooth AB background (canvas -> dataURL)
+   ========================= */
+function makeABCanvas(size, L_for_bg=50){
+  // size: canvas size in px. Use moderate size for performance on phones (e.g. 256 or 320)
+  const c = document.createElement('canvas'); c.width = size; c.height = size;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(size, size);
+  for(let j=0;j<size;j++){
+    for(let i=0;i<size;i++){
+      // map i->a in [-100,100], j->b in [100,-100] (so y up is +b)
+      const a = (i/ (size-1))*200 - 100;
+      const b = ((size-1-j)/ (size-1))*200 - 100;
+      const rgb = labToSRGB([L_for_bg, a, b]).map(x => Math.round(x*255));
+      const idx = (j*size + i)*4;
+      img.data[idx]   = rgb[0];
+      img.data[idx+1] = rgb[1];
+      img.data[idx+2] = rgb[2];
+      img.data[idx+3] = 255;
     }
   }
-  ctx.putImageData(imgData, 0, 0);
-  return canvas.toDataURL();
+  ctx.putImageData(img, 0, 0);
+  return c.toDataURL();
 }
 
-function updatePlot() {
-  const lab1 = [parseFloat(L1.value), parseFloat(a1.value), parseFloat(b1.value)];
-  const lab2 = [parseFloat(L2.value), parseFloat(a2.value), parseFloat(b2.value)];
-  const dE76 = deltaE76(lab1, lab2).toFixed(3);
-  const c1 = labToChroma(lab1).toFixed(2);
-  const c2 = labToChroma(lab2).toFixed(2);
-  const h1 = labToHue(lab1).toFixed(1);
-  const h2 = labToHue(lab2).toFixed(1);
+/* =========================
+   Plot building
+   ========================= */
+const plotAB = document.getElementById('plotAB');
+const plotCL = document.getElementById('plotCL');
+const buildBtn = document.getElementById('buildBtn');
+const metricsBox = document.getElementById('metrics');
 
-  metrics.innerHTML = `ΔE76: <b>${dE76}</b><br>Chroma: Ref=${c1}, Sample=${c2}<br>Hue: Ref=${h1}°, Sample=${h2}°`;
-
-  const bgImg = generateABBackground(256);
-
-  const refPoint = { x: [lab1[1]], y: [lab1[2]], mode: 'markers', type: 'scatter', name: 'Reference', marker: { size: 14, color: 'red' } };
-  const samplePoint = { x: [lab2[1]], y: [lab2[2]], mode: 'markers', type: 'scatter', name: 'Sample', marker: { size: 14, color: 'blue' } };
-  const vector = { x: [lab1[1], lab2[1]], y: [lab1[2], lab2[2]], mode: 'lines+markers', type: 'scatter', name: 'Δ Vector', line: { dash: 'dot', width: 2, color: 'black' } };
-
-  Plotly.newPlot('plotAB', [refPoint, samplePoint, vector], {
-    xaxis: { title: 'a*', range: [-100, 100], scaleanchor: "y" },
-    yaxis: { title: 'b*', range: [-100, 100] },
-    title: 'CIELab a* vs b*',
-    images: [{ source: bgImg, xref: "x", yref: "y", x: -100, y: 100, sizex: 200, sizey: 200, layer: "below" }],
-    dragmode: 'pan'
-  }, { responsive: true, scrollZoom: true });
-
-  const clPoints = { x: [c1, c2], y: [lab1[0], lab2[0]], mode: 'markers+text', type: 'scatter', text: ['Ref', 'Sample'], textposition: 'right', marker: { size: 14, color: ['red', 'blue'] }, name: 'Chroma-L' };
-  Plotly.newPlot('plotCL', [clPoints], {
-    xaxis: { title: 'Chroma' },
-    yaxis: { title: 'Lightness L*' },
-    title: 'Chroma vs Lightness'
-  }, { responsive: true });
+function readLabs(){
+  return [
+    [parseFloat(document.getElementById('L1').value || 0),
+     parseFloat(document.getElementById('a1').value || 0),
+     parseFloat(document.getElementById('b1').value || 0)],
+    [parseFloat(document.getElementById('L2').value || 0),
+     parseFloat(document.getElementById('a2').value || 0),
+     parseFloat(document.getElementById('b2').value || 0)]
+  ];
 }
 
-updatePlot();
+async function build(){
+  const [labRef, labSamp] = readLabs();
+  const dE = deltaE76(labRef, labSamp);
+  const Cref = chroma(labRef).toFixed(2), Csamp = chroma(labSamp).toFixed(2);
+  const href = hueDeg(labRef).toFixed(1), hs = hueDeg(labSamp).toFixed(1);
+
+  metricsBox.innerHTML = `<strong>ΔE76:</strong> ${dE.toFixed(3)} &nbsp; | &nbsp;
+                          <strong>Ref:</strong> C=${Cref}, h=${href}° &nbsp; | &nbsp;
+                          <strong>Sample:</strong> C=${Csamp}, h=${hs}°`;
+
+  // generate background image (keep size moderate for phones for perf)
+  const bgDataUrl = makeABCanvas(320, 55); // L ~ 55 gives representative hues
+
+  // points and vector
+  const refTrace = { x:[labRef[1]], y:[labRef[2]], mode:'markers', name:'Reference', marker:{size:16, color: `rgba(0,0,0,0.85)` , symbol:'circle-open'} };
+  const sampTrace = { x:[labSamp[1]], y:[labSamp[2]], mode:'markers', name:'Sample', marker:{size:16, color: `rgba(0,0,0,0.85)`, symbol:'x'} };
+  const vecTrace = { x:[labRef[1], labSamp[1]], y:[labRef[2], labSamp[2]], mode:'lines', name:'Vector', line:{dash:'dot', width:2, color:'#333'} };
+
+  const layoutAB = {
+    title: { text:'CIELab a* vs b*', x:0.02, xanchor:'left' },
+    xaxis: { title:'a*', range:[-105,105], zeroline:false, scaleratio:1 },
+    yaxis: { title:'b*', range:[-105,105], zeroline:false },
+    images: [{ source:bgDataUrl, xref:'x', yref:'y', x:-100, y:100, sizex:200, sizey:200, sizing:'stretch', layer:'below' }],
+    margin:{l:50,r:10,t:50,b:50},
+    dragmode:'pan'
+  };
+
+  // config: enable scrollZoom (pinch as wheel), show modebar so reset is available, responsive
+  const configAB = { scrollZoom:true, displayModeBar:true, responsive:true, staticPlot:false };
+
+  // create plot (use Plotly.react to avoid flicker)
+  await Plotly.react(plotAB, [refTrace, sampTrace, vecTrace], layoutAB, configAB);
+
+  // ensure the plot element doesn't allow page zoom: touch-action none set in CSS
+  // Now Chroma vs L*
+  const clTrace = {
+    x: [Cref, Csamp].map(Number),
+    y: [labRef[0], labSamp[0]],
+    mode: 'markers+text',
+    text: ['Ref','Sample'],
+    textposition: 'right',
+    marker: { size:14, color:['#111','#111'] }
+  };
+  const layoutCL = { title:'Chroma vs Lightness (L*)', xaxis:{title:'Chroma'}, yaxis:{title:'L*', range:[0,100]}, margin:{l:50,r:10,t:40,b:40} };
+  const configCL = { scrollZoom:true, displayModeBar:true, responsive:true, staticPlot:false };
+  await Plotly.react(plotCL, [clTrace], layoutCL, configCL);
+
+  // set initial zoom hint for mobile: small overlay? (skip to keep UI minimal)
+}
+
+/* attach */
+buildBtn.addEventListener('click', build);
+
+/* build on first load */
+window.addEventListener('load', build);
+
+/* register service worker (optional) */
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('service-worker.js').then(()=>console.log('sw registered')).catch(e=>console.log('sw reg failed', e));
+}
+
+/* Prevent accidental page pinch/zoom while interacting inside graphs:
+   touch-action: none (CSS) is the primary. But on some browsers also prevent default for two-finger gestures.
+   We attach passive:false listeners on plot containers to ensure JS receives gesture events.
+*/
+function allowPlotTouchInteraction(el){
+  if(!el) return;
+  el.addEventListener('touchstart', function(e){ /* no-op, but keep default prevented if needed */ }, {passive:false});
+  el.addEventListener('touchmove', function(e){ /* no-op */ }, {passive:false});
+}
+allowPlotTouchInteraction(plotAB);
+allowPlotTouchInteraction(plotCL);
 </script>
 </body>
 </html>
-
