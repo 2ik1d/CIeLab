@@ -55,4 +55,100 @@ function deltaE76(lab1, lab2) {
     Math.pow(lab1[2]-lab2[2],2)
   );
 }
-function labToChroma(lab) { return Math.
+function labToChroma(lab) { return Math.sqrt(lab[1]**2 + lab[2]**2); }
+function labToHue(lab) {
+  let hue = Math.atan2(lab[2], lab[1]) * 180 / Math.PI;
+  return hue >= 0 ? hue : hue + 360;
+}
+
+// LAB -> XYZ -> RGB
+function labToXYZ(lab) {
+  let [L,a,b] = lab;
+  let y = (L + 16) / 116;
+  let x = a / 500 + y;
+  let z = y - b / 200;
+  const xyz = [x, y, z].map(v => {
+    let v3 = v**3;
+    return (v3 > 0.008856) ? v3 : (v - 16/116) / 7.787;
+  });
+  return [
+    xyz[0] * 95.047,
+    xyz[1] * 100.0,
+    xyz[2] * 108.883
+  ];
+}
+function xyzToRGB(xyz) {
+  let [x,y,z] = xyz.map(v => v / 100);
+  let r = x*3.2406 + y*(-1.5372) + z*(-0.4986);
+  let g = x*(-0.9689) + y*1.8758 + z*0.0415;
+  let b = x*0.0557 + y*(-0.2040) + z*1.0570;
+  const rgb = [r,g,b].map(v => {
+    v = v > 0.0031308 ? 1.055*(v**(1/2.4)) - 0.055 : 12.92*v;
+    return Math.min(Math.max(0, v), 1);
+  });
+  return rgb;
+}
+function labToRGB(lab) {
+  return xyzToRGB(labToXYZ(lab));
+}
+
+function generateABBackground(size=256) {
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const L = 50; // фиксируем L для фона
+  const imgData = ctx.createImageData(size, size);
+  for (let y=0; y<size; y++) {
+    for (let x=0; x<size; x++) {
+      let a = (x / size) * 200 - 100;
+      let b = ((size-y) / size) * 200 - 100;
+      const rgb = labToRGB([L, a, b]).map(v => Math.round(v*255));
+      const idx = (y*size + x)*4;
+      imgData.data[idx] = rgb[0];
+      imgData.data[idx+1] = rgb[1];
+      imgData.data[idx+2] = rgb[2];
+      imgData.data[idx+3] = 255;
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
+  return canvas.toDataURL();
+}
+
+function updatePlot() {
+  const lab1 = [parseFloat(L1.value), parseFloat(a1.value), parseFloat(b1.value)];
+  const lab2 = [parseFloat(L2.value), parseFloat(a2.value), parseFloat(b2.value)];
+  const dE76 = deltaE76(lab1, lab2).toFixed(3);
+  const c1 = labToChroma(lab1).toFixed(2);
+  const c2 = labToChroma(lab2).toFixed(2);
+  const h1 = labToHue(lab1).toFixed(1);
+  const h2 = labToHue(lab2).toFixed(1);
+
+  metrics.innerHTML = `ΔE76: <b>${dE76}</b><br>Chroma: Ref=${c1}, Sample=${c2}<br>Hue: Ref=${h1}°, Sample=${h2}°`;
+
+  const bgImg = generateABBackground(256);
+
+  const refPoint = { x: [lab1[1]], y: [lab1[2]], mode: 'markers', type: 'scatter', name: 'Reference', marker: { size: 14, color: 'red' } };
+  const samplePoint = { x: [lab2[1]], y: [lab2[2]], mode: 'markers', type: 'scatter', name: 'Sample', marker: { size: 14, color: 'blue' } };
+  const vector = { x: [lab1[1], lab2[1]], y: [lab1[2], lab2[2]], mode: 'lines+markers', type: 'scatter', name: 'Δ Vector', line: { dash: 'dot', width: 2, color: 'black' } };
+
+  Plotly.newPlot('plotAB', [refPoint, samplePoint, vector], {
+    xaxis: { title: 'a*', range: [-100, 100], scaleanchor: "y" },
+    yaxis: { title: 'b*', range: [-100, 100] },
+    title: 'CIELab a* vs b*',
+    images: [{ source: bgImg, xref: "x", yref: "y", x: -100, y: 100, sizex: 200, sizey: 200, layer: "below" }],
+    dragmode: 'pan'
+  }, { responsive: true, scrollZoom: true });
+
+  const clPoints = { x: [c1, c2], y: [lab1[0], lab2[0]], mode: 'markers+text', type: 'scatter', text: ['Ref', 'Sample'], textposition: 'right', marker: { size: 14, color: ['red', 'blue'] }, name: 'Chroma-L' };
+  Plotly.newPlot('plotCL', [clPoints], {
+    xaxis: { title: 'Chroma' },
+    yaxis: { title: 'Lightness L*' },
+    title: 'Chroma vs Lightness'
+  }, { responsive: true });
+}
+
+updatePlot();
+</script>
+</body>
+</html>
